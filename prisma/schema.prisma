@@ -1,0 +1,184 @@
+// FDA Guidance Navigator - Prisma Schema
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  extensions = [vector]
+}
+
+// ============ DOCUMENTS ============
+
+model GuidanceDocument {
+  id            String         @id @default(cuid())
+
+  // Core metadata
+  title         String
+  fdaDocumentId String         @unique  // FDA's internal document ID
+  issueDate     DateTime
+  status        DocumentStatus
+
+  // Content
+  pdfUrl        String         // S3/R2 URL or local path
+  pdfHash       String?        // For detecting updates
+  summary       String?        @db.Text
+
+  // FDA Organization
+  center        String         // e.g., "CDER", "CDRH", "CFSAN"
+
+  // Relationships
+  tags          DocumentTag[]
+  comments      Comment[]
+  chunks        DocumentChunk[]
+
+  // Timestamps
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([status])
+  @@index([issueDate])
+  @@index([center])
+}
+
+enum DocumentStatus {
+  DRAFT
+  FINAL
+  WITHDRAWN
+  SUPERSEDED
+}
+
+// ============ TAGS (FDA-DEFINED) ============
+
+model Tag {
+  id          String      @id @default(cuid())
+  name        String      @unique
+  category    TagCategory
+  description String?
+
+  documents   DocumentTag[]
+
+  createdAt   DateTime    @default(now())
+}
+
+enum TagCategory {
+  PRODUCT_AREA    // e.g., "Drugs", "Medical Devices", "Biologics"
+  TOPIC           // e.g., "Clinical Trials", "CMC", "GMP"
+  REGULATORY_TYPE // e.g., "Draft Guidance", "Final Guidance"
+}
+
+model DocumentTag {
+  document    GuidanceDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  documentId  String
+  tag         Tag              @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  tagId       String
+
+  @@id([documentId, tagId])
+  @@index([tagId])
+}
+
+// ============ COMMENTS ============
+
+model Comment {
+  id                String   @id @default(cuid())
+
+  // Content
+  content           String   @db.Text
+
+  // PDF Position (stored as JSONB)
+  highlightPosition Json?    // HighlightPosition type
+  textAnchor        Json?    // TextAnchor for fallback positioning
+  selectedText      String?  @db.Text  // The highlighted text
+  pageNumber        Int?
+
+  // Threading
+  parentId          String?
+  parent            Comment? @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies           Comment[] @relation("CommentReplies")
+
+  // Document relationship
+  document          GuidanceDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  documentId        String
+
+  // Optional user info (anonymous by default)
+  authorName        String?
+  authorEmail       String?
+  authorAffiliation String?
+
+  // Moderation
+  isVisible         Boolean  @default(true)
+
+  // Timestamps
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([documentId])
+  @@index([parentId])
+  @@index([pageNumber])
+}
+
+// ============ RAG CHUNKS ============
+
+model DocumentChunk {
+  id           String   @id @default(cuid())
+
+  // Relationship
+  document     GuidanceDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  documentId   String
+
+  // Content
+  content      String   @db.Text
+  pageStart    Int?
+  pageEnd      Int?
+  sectionTitle String?
+
+  // Vector embedding (1536 dimensions for OpenAI text-embedding-3-small)
+  embedding    Unsupported("vector(1536)")?
+
+  // Metadata
+  chunkIndex   Int
+  tokenCount   Int?
+
+  createdAt    DateTime @default(now())
+
+  @@index([documentId])
+}
+
+// ============ CHAT SESSIONS ============
+
+model ChatSession {
+  id         String        @id @default(cuid())
+
+  messages   ChatMessage[]
+
+  // Optional: scope to document
+  documentId String?
+
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+}
+
+model ChatMessage {
+  id        String      @id @default(cuid())
+
+  session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionId String
+
+  role      MessageRole
+  content   String      @db.Text
+
+  // Source citations
+  sources   Json?       // Array of {documentId, chunkId, relevanceScore}
+
+  createdAt DateTime    @default(now())
+
+  @@index([sessionId])
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
