@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { CommentForm } from "./comment-form";
 
 interface Comment {
@@ -24,7 +25,11 @@ interface CommentThreadProps {
   isSelected: boolean;
   onClick: () => void;
   onReplyAdded: (reply: Comment) => void;
+  onCommentUpdated?: (comment: Comment) => void;
+  onCommentDeleted?: (commentId: string) => void;
 }
+
+const EDIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 
 export function CommentThread({
   comment,
@@ -32,8 +37,18 @@ export function CommentThread({
   isSelected,
   onClick,
   onReplyAdded,
+  onCommentUpdated,
+  onCommentDeleted,
 }: CommentThreadProps) {
   const [showReplyForm, setShowReplyForm] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editContent, setEditContent] = useState(comment.content);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Check if within edit/delete window
+  const timeSinceCreation = Date.now() - new Date(comment.createdAt).getTime();
+  const canEditOrDelete = timeSinceCreation < EDIT_WINDOW_MS;
+  const remainingMinutes = Math.max(0, Math.ceil((EDIT_WINDOW_MS - timeSinceCreation) / 60000));
 
   const handleReplySubmit = async (data: {
     content: string;
@@ -65,6 +80,62 @@ export function CommentThread({
     } catch (error) {
       console.error("Error saving reply:", error);
       alert("Failed to save reply. Please try again.");
+    }
+  };
+
+  const handleEdit = async () => {
+    if (!editContent.trim() || editContent === comment.content) {
+      setIsEditing(false);
+      setEditContent(comment.content);
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const response = await fetch(`/api/comments/${comment.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: editContent }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || "Failed to update comment");
+      }
+
+      const updatedComment = await response.json();
+      onCommentUpdated?.(updatedComment);
+      setIsEditing(false);
+    } catch (error) {
+      console.error("Error updating comment:", error);
+      alert(error instanceof Error ? error.message : "Failed to update comment");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!confirm("Are you sure you want to delete this comment?")) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const response = await fetch(`/api/comments/${comment.id}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || "Failed to delete comment");
+      }
+
+      onCommentDeleted?.(comment.id);
+    } catch (error) {
+      console.error("Error deleting comment:", error);
+      alert(error instanceof Error ? error.message : "Failed to delete comment");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -122,24 +193,84 @@ export function CommentThread({
       </div>
 
       {/* Comment content */}
-      <p className="text-sm">{comment.content}</p>
+      {isEditing ? (
+        <div onClick={(e) => e.stopPropagation()} className="space-y-2">
+          <Textarea
+            value={editContent}
+            onChange={(e) => setEditContent(e.target.value)}
+            className="min-h-[60px] text-sm"
+          />
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              onClick={handleEdit}
+              disabled={isSubmitting || !editContent.trim()}
+            >
+              {isSubmitting ? "Saving..." : "Save"}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setIsEditing(false);
+                setEditContent(comment.content);
+              }}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <p className="text-sm">{comment.content}</p>
+      )}
 
       {/* Comment footer */}
       <div className="flex items-center justify-between mt-2">
         <span className="text-xs text-muted-foreground">
           {formatDate(comment.createdAt)}
         </span>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 text-xs"
-          onClick={(e) => {
-            e.stopPropagation();
-            setShowReplyForm(!showReplyForm);
-          }}
-        >
-          Reply
-        </Button>
+        <div className="flex gap-1">
+          {canEditOrDelete && !isEditing && (
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 text-xs"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsEditing(true);
+                }}
+                title={`Edit (${remainingMinutes} min remaining)`}
+              >
+                Edit
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 text-xs text-destructive hover:text-destructive"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDelete();
+                }}
+                disabled={isSubmitting}
+                title={`Delete (${remainingMinutes} min remaining)`}
+              >
+                Delete
+              </Button>
+            </>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 text-xs"
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowReplyForm(!showReplyForm);
+            }}
+          >
+            Reply
+          </Button>
+        </div>
       </div>
 
       {/* Replies */}

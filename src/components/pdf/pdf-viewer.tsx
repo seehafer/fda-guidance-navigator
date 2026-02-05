@@ -257,6 +257,16 @@ export function PdfViewer({ documentId, pdfUrl, initialComments }: PdfViewerProp
           onCommentAdded={(comment) => {
             setComments((prev) => [comment, ...prev]);
           }}
+          onCommentUpdated={(updatedComment) => {
+            setComments((prev) =>
+              prev.map((c) =>
+                c.id === updatedComment.id ? updatedComment : c
+              )
+            );
+          }}
+          onCommentDeleted={(commentId) => {
+            setComments((prev) => prev.filter((c) => c.id !== commentId));
+          }}
         />
       </div>
     </div>

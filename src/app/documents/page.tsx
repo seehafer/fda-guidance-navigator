@@ -2,7 +2,10 @@ import { Suspense } from "react";
 import { prisma } from "@/lib/db";
 import { DocumentList } from "@/components/documents/document-list";
 import { TagFilter } from "@/components/documents/tag-filter";
-import { Input } from "@/components/ui/input";
+import { SearchForm } from "@/components/documents/search-form";
+import { StatusFilter } from "@/components/documents/status-filter";
+import { CenterFilter } from "@/components/documents/center-filter";
+import { Separator } from "@/components/ui/separator";
 
 interface DocumentsPageProps {
   searchParams: Promise<{
@@ -31,6 +34,7 @@ async function getDocuments(params: {
     where.OR = [
       { title: { contains: search, mode: "insensitive" } },
       { summary: { contains: search, mode: "insensitive" } },
+      { fdaDocumentId: { contains: search, mode: "insensitive" } },
     ];
   }
 
@@ -101,34 +105,43 @@ export default async function DocumentsPage({ searchParams }: DocumentsPageProps
     getTags(),
   ]);
 
+  // Check if any filters are active
+  const hasActiveFilters =
+    params.search || tagIds.length > 0 || params.status || params.center;
+
   return (
     <div className="flex flex-col lg:flex-row gap-6">
-      <aside className="w-full lg:w-64 shrink-0">
-        <div className="sticky top-20">
-          <h2 className="font-semibold mb-4">Filter by Tags</h2>
+      <aside className="w-full lg:w-72 shrink-0">
+        <div className="sticky top-20 space-y-6">
           <Suspense fallback={<div>Loading filters...</div>}>
-            <TagFilter tags={tags} selectedTagIds={tagIds} />
+            <StatusFilter />
+            <Separator />
+            <CenterFilter />
+            <Separator />
+            <div>
+              <h3 className="text-sm font-medium mb-2">Topics</h3>
+              <TagFilter tags={tags} selectedTagIds={tagIds} />
+            </div>
           </Suspense>
         </div>
       </aside>
 
       <div className="flex-1">
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold">Guidance Documents</h1>
-          <span className="text-muted-foreground">
-            {total} document{total !== 1 ? "s" : ""}
-          </span>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+          <div>
+            <h1 className="text-2xl font-bold">Guidance Documents</h1>
+            <p className="text-muted-foreground">
+              {total} document{total !== 1 ? "s" : ""}
+              {hasActiveFilters ? " matching filters" : ""}
+            </p>
+          </div>
         </div>
 
-        <form className="mb-6">
-          <Input
-            type="search"
-            name="search"
-            placeholder="Search documents..."
-            defaultValue={params.search}
-            className="max-w-md"
-          />
-        </form>
+        <div className="mb-6">
+          <Suspense fallback={<div>Loading search...</div>}>
+            <SearchForm />
+          </Suspense>
+        </div>
 
         <Suspense fallback={<div>Loading documents...</div>}>
           <DocumentList

@@ -4,7 +4,6 @@ import { useState } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { CommentThread } from "./comment-thread";
-import { cn } from "@/lib/utils";
 
 interface Comment {
   id: string;
@@ -25,6 +24,8 @@ interface CommentSidebarProps {
   selectedCommentId: string | null;
   onCommentClick: (commentId: string) => void;
   onCommentAdded: (comment: Comment) => void;
+  onCommentUpdated?: (comment: Comment) => void;
+  onCommentDeleted?: (commentId: string) => void;
 }
 
 export function CommentSidebar({
@@ -33,6 +34,8 @@ export function CommentSidebar({
   selectedCommentId,
   onCommentClick,
   onCommentAdded,
+  onCommentUpdated,
+  onCommentDeleted,
 }: CommentSidebarProps) {
   const [sortBy, setSortBy] = useState<"newest" | "page">("newest");
 
@@ -91,6 +94,8 @@ export function CommentSidebar({
                       replies: [...comment.replies, reply],
                     });
                   }}
+                  onCommentUpdated={onCommentUpdated}
+                  onCommentDeleted={onCommentDeleted}
                 />
                 <Separator className="mt-3" />
               </div>
