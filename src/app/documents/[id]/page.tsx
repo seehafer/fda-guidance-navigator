@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { PdfViewerWrapper } from "@/components/pdf/pdf-viewer-wrapper";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DocumentChatPanel } from "@/components/chat/document-chat-panel";
 import Link from "next/link";
 
 interface DocumentPageProps {
@@ -99,16 +100,19 @@ export default async function DocumentPage({ params }: DocumentPageProps) {
         </div>
       </div>
 
-      {/* PDF Viewer */}
-      <div className="flex-1 min-h-0">
-        <PdfViewerWrapper
-          documentId={document.id}
-          pdfUrl={document.pdfUrl}
-          initialComments={document.comments.map((c) => ({
-            ...c,
-            replies: c.replies.map((r) => ({ ...r, replies: [] })),
-          }))}
-        />
+      {/* PDF Viewer and Chat */}
+      <div className="flex-1 min-h-0 flex gap-4">
+        <div className="flex-1 min-w-0">
+          <PdfViewerWrapper
+            documentId={document.id}
+            pdfUrl={document.pdfUrl}
+            initialComments={document.comments.map((c) => ({
+              ...c,
+              replies: c.replies.map((r) => ({ ...r, replies: [] })),
+            }))}
+          />
+        </div>
+        <DocumentChatPanel documentId={document.id} documentTitle={document.title} />
       </div>
     </div>
   );
