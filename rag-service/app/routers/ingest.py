@@ -110,7 +110,7 @@ async def ingest_document(
 @router.post("/all")
 async def ingest_all_documents(background_tasks: BackgroundTasks):
     """
-    Ingest all documents that haven't been processed yet.
+    Ingest all documents that haven't been processed yet (background).
     """
     with get_db_cursor() as cursor:
         cursor.execute(
@@ -139,6 +139,71 @@ async def ingest_all_documents(background_tasks: BackgroundTasks):
     }
 
 
+@router.post("/all/sync")
+async def ingest_all_documents_sync():
+    """
+    Ingest all pending documents synchronously (waits for completion).
+    Returns detailed results for each document.
+    """
+    with get_db_cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT gd.id, gd.title, gd."pdfUrl"
+            FROM "GuidanceDocument" gd
+            WHERE NOT EXISTS (
+                SELECT 1 FROM "DocumentChunk" dc
+                WHERE dc."documentId" = gd.id
+            )
+            AND gd."pdfUrl" IS NOT NULL
+            """
+        )
+        documents = cursor.fetchall()
+
+    results = []
+    for i, doc in enumerate(documents):
+        print(f"[{i+1}/{len(documents)}] Processing: {doc['title'][:60]}...")
+        try:
+            await process_document(doc["id"], doc["pdfUrl"])
+
+            # Get chunk count
+            with get_db_cursor() as cursor:
+                cursor.execute(
+                    'SELECT COUNT(*) as count FROM "DocumentChunk" WHERE "documentId" = %s',
+                    (doc["id"],)
+                )
+                chunk_count = cursor.fetchone()["count"]
+
+            results.append({
+                "id": doc["id"],
+                "title": doc["title"],
+                "status": "completed",
+                "chunks_count": chunk_count,
+                "error": None
+            })
+            print(f"  ✓ Created {chunk_count} chunks")
+        except Exception as e:
+            results.append({
+                "id": doc["id"],
+                "title": doc["title"],
+                "status": "failed",
+                "chunks_count": 0,
+                "error": str(e)
+            })
+            print(f"  ✗ Error: {e}")
+
+    completed = sum(1 for r in results if r["status"] == "completed")
+    failed = sum(1 for r in results if r["status"] == "failed")
+
+    return {
+        "summary": {
+            "processed": len(results),
+            "completed": completed,
+            "failed": failed
+        },
+        "results": results
+    }
+
+
 @router.get("/status/{document_id}")
 async def get_ingest_status(document_id: str):
     """Get the ingestion status for a document."""
@@ -153,4 +218,51 @@ async def get_ingest_status(document_id: str):
         "document_id": document_id,
         "chunks_count": result["count"],
         "status": "completed" if result["count"] > 0 else "pending"
+    }
+
+
+@router.get("/status")
+async def get_all_ingest_status():
+    """Get ingestion status for all documents."""
+    with get_db_cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT
+                gd.id,
+                gd.title,
+                gd."fdaDocumentId",
+                gd.center,
+                COALESCE(dc.chunk_count, 0) as chunks_count,
+                CASE WHEN dc.chunk_count > 0 THEN 'completed' ELSE 'pending' END as status
+            FROM "GuidanceDocument" gd
+            LEFT JOIN (
+                SELECT "documentId", COUNT(*) as chunk_count
+                FROM "DocumentChunk"
+                GROUP BY "documentId"
+            ) dc ON gd.id = dc."documentId"
+            ORDER BY dc.chunk_count DESC NULLS LAST, gd.title
+            """
+        )
+        documents = cursor.fetchall()
+
+    completed = sum(1 for d in documents if d["status"] == "completed")
+    pending = sum(1 for d in documents if d["status"] == "pending")
+
+    return {
+        "summary": {
+            "total": len(documents),
+            "completed": completed,
+            "pending": pending
+        },
+        "documents": [
+            {
+                "id": doc["id"],
+                "title": doc["title"],
+                "fda_document_id": doc["fdaDocumentId"],
+                "center": doc["center"],
+                "chunks_count": doc["chunks_count"],
+                "status": doc["status"]
+            }
+            for doc in documents
+        ]
     }

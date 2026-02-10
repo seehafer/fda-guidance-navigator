@@ -1,4 +1,4 @@
-import fitz  # PyMuPDF
+from pypdf import PdfReader
 import tiktoken
 from typing import List, Dict, Optional
 import httpx
@@ -17,17 +17,15 @@ class ChunkingService:
 
     def extract_text_from_pdf(self, pdf_path: str) -> List[Dict]:
         """Extract text from PDF, returning list of {page, text} dicts."""
-        doc = fitz.open(pdf_path)
+        reader = PdfReader(pdf_path)
         pages = []
-        for page_num in range(len(doc)):
-            page = doc[page_num]
-            text = page.get_text()
-            if text.strip():
+        for page_num, page in enumerate(reader.pages):
+            text = page.extract_text()
+            if text and text.strip():
                 pages.append({
                     "page": page_num + 1,
                     "text": text.strip()
                 })
-        doc.close()
         return pages
 
     async def extract_text_from_url(self, pdf_url: str) -> List[Dict]:

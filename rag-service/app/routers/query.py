@@ -67,7 +67,7 @@ async def query_documents(request: QueryRequest):
                 (request.session_id,)
             )
             chat_history = [
-                {"role": row["role"], "content": row["content"]}
+                {"role": row["role"].lower(), "content": row["content"]}
                 for row in cursor.fetchall()
             ]
 
@@ -83,41 +83,32 @@ async def query_documents(request: QueryRequest):
 
     # Save messages to session
     with get_db_cursor() as cursor:
-        # Ensure session exists
-        if not request.session_id:
-            cursor.execute(
-                """
-                INSERT INTO "ChatSession" (id, "createdAt", "updatedAt")
-                VALUES (%s, NOW(), NOW())
-                ON CONFLICT (id) DO NOTHING
-                """,
-                (session_id,)
-            )
+        # Always ensure session exists (upsert)
+        cursor.execute(
+            """
+            INSERT INTO "ChatSession" (id, "createdAt", "updatedAt")
+            VALUES (%s, NOW(), NOW())
+            ON CONFLICT (id) DO UPDATE SET "updatedAt" = NOW()
+            """,
+            (session_id,)
+        )
 
         # Save user message
         cursor.execute(
             """
             INSERT INTO "ChatMessage" (id, "sessionId", role, content, "createdAt")
-            VALUES (%s, %s, %s, %s, NOW())
+            VALUES (%s, %s, 'USER'::"MessageRole", %s, NOW())
             """,
-            (str(uuid.uuid4()), session_id, "user", request.question)
+            (str(uuid.uuid4()), session_id, request.question)
         )
 
         # Save assistant message
         cursor.execute(
             """
             INSERT INTO "ChatMessage" (id, "sessionId", role, content, "createdAt")
-            VALUES (%s, %s, %s, %s, NOW())
+            VALUES (%s, %s, 'ASSISTANT'::"MessageRole", %s, NOW())
             """,
-            (str(uuid.uuid4()), session_id, "assistant", answer)
-        )
-
-        # Update session timestamp
-        cursor.execute(
-            """
-            UPDATE "ChatSession" SET "updatedAt" = NOW() WHERE id = %s
-            """,
-            (session_id,)
+            (str(uuid.uuid4()), session_id, answer)
         )
 
     # Build sources
@@ -173,7 +164,7 @@ async def query_documents_stream(request: QueryRequest):
                 (request.session_id,)
             )
             chat_history = [
-                {"role": row["role"], "content": row["content"]}
+                {"role": row["role"].lower(), "content": row["content"]}
                 for row in cursor.fetchall()
             ]
 
@@ -207,30 +198,30 @@ async def query_documents_stream(request: QueryRequest):
 
         # Save to database after streaming completes
         with get_db_cursor() as cursor:
-            if not request.session_id:
-                cursor.execute(
-                    """
-                    INSERT INTO "ChatSession" (id, "createdAt", "updatedAt")
-                    VALUES (%s, NOW(), NOW())
-                    ON CONFLICT (id) DO NOTHING
-                    """,
-                    (session_id,)
-                )
-
+            # Always ensure session exists (upsert)
             cursor.execute(
                 """
-                INSERT INTO "ChatMessage" (id, "sessionId", role, content, "createdAt")
-                VALUES (%s, %s, %s, %s, NOW())
+                INSERT INTO "ChatSession" (id, "createdAt", "updatedAt")
+                VALUES (%s, NOW(), NOW())
+                ON CONFLICT (id) DO UPDATE SET "updatedAt" = NOW()
                 """,
-                (str(uuid.uuid4()), session_id, "user", request.question)
+                (session_id,)
             )
 
             cursor.execute(
                 """
                 INSERT INTO "ChatMessage" (id, "sessionId", role, content, "createdAt")
-                VALUES (%s, %s, %s, %s, NOW())
+                VALUES (%s, %s, 'USER'::"MessageRole", %s, NOW())
                 """,
-                (str(uuid.uuid4()), session_id, "assistant", full_response)
+                (str(uuid.uuid4()), session_id, request.question)
+            )
+
+            cursor.execute(
+                """
+                INSERT INTO "ChatMessage" (id, "sessionId", role, content, "createdAt")
+                VALUES (%s, %s, 'ASSISTANT'::"MessageRole", %s, NOW())
+                """,
+                (str(uuid.uuid4()), session_id, full_response)
             )
 
         yield f"data: {json.dumps({'type': 'done'})}\n\n"

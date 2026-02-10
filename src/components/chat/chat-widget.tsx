@@ -152,9 +152,10 @@ export function ChatWidget({ documentId, className }: ChatWidgetProps) {
   };
 
   return (
-    <div className={cn("flex flex-col h-full", className)}>
+    <div className={cn("flex flex-col h-full overflow-hidden", className)}>
       {/* Messages */}
-      <ScrollArea className="flex-1 p-4" ref={scrollRef}>
+      <ScrollArea className="flex-1 min-h-0" ref={scrollRef}>
+        <div className="p-4">
         {messages.length === 0 ? (
           <div className="text-center py-8 text-muted-foreground">
             <p className="text-lg font-medium mb-2">
@@ -224,10 +225,11 @@ export function ChatWidget({ documentId, className }: ChatWidgetProps) {
             ))}
           </div>
         )}
+        </div>
       </ScrollArea>
 
       {/* Input */}
-      <form onSubmit={handleSubmit} className="p-4 border-t">
+      <form onSubmit={handleSubmit} className="flex-shrink-0 p-4 border-t">
         <div className="flex gap-2">
           <Textarea
             ref={inputRef}

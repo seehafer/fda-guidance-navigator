@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 
-const RAG_SERVICE_URL = process.env.RAG_SERVICE_URL || "http://localhost:8000";
+const RAG_SERVICE_URL = process.env.RAG_SERVICE_URL || "http://127.0.0.1:8000";
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,8 +14,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const queryUrl = `${RAG_SERVICE_URL}/query/stream`;
+    console.log(`Querying RAG service at: ${queryUrl}`);
+
     // Forward to RAG service with streaming
-    const response = await fetch(`${RAG_SERVICE_URL}/query/stream`, {
+    const response = await fetch(queryUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -30,6 +33,7 @@ export async function POST(request: NextRequest) {
 
     if (!response.ok) {
       const error = await response.text();
+      console.error(`RAG service error: ${response.status} - ${error}`);
       return Response.json(
         { error: error || "Failed to query documents" },
         { status: response.status }
@@ -46,8 +50,9 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error("Error in chat API:", error);
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
     return Response.json(
-      { error: "Failed to process chat request" },
+      { error: `Failed to process chat request: ${errorMessage}` },
       { status: 500 }
     );
   }
