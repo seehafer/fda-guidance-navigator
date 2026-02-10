@@ -31,6 +31,19 @@ interface PdfViewerProps {
   initialComments: Comment[];
 }
 
+// Proxy FDA URLs through our API to avoid CORS issues
+function getProxiedUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname.includes("fda.gov")) {
+      return `/api/pdf?url=${encodeURIComponent(url)}`;
+    }
+  } catch {
+    // Invalid URL, return as-is
+  }
+  return url;
+}
+
 export function PdfViewer({ documentId, pdfUrl, initialComments }: PdfViewerProps) {
   const [numPages, setNumPages] = useState<number | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
@@ -43,6 +56,10 @@ export function PdfViewer({ documentId, pdfUrl, initialComments }: PdfViewerProp
   const [showCommentsSidebar, setShowCommentsSidebar] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+
+  // Get the proxied URL for FDA documents
+  const proxiedPdfUrl = getProxiedUrl(pdfUrl);
 
   // Detect mobile viewport
   useEffect(() => {
@@ -51,6 +68,38 @@ export function PdfViewer({ documentId, pdfUrl, initialComments }: PdfViewerProp
     window.addEventListener("resize", checkMobile);
     return () => window.removeEventListener("resize", checkMobile);
   }, []);
+
+  // Track current page based on scroll position
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || !numPages) return;
+
+    const handleScroll = () => {
+      const containerRect = container.getBoundingClientRect();
+      const containerCenter = containerRect.top + containerRect.height / 2;
+
+      let closestPage = 1;
+      let closestDistance = Infinity;
+
+      pageRefs.current.forEach((pageEl, pageNum) => {
+        const pageRect = pageEl.getBoundingClientRect();
+        const pageCenter = pageRect.top + pageRect.height / 2;
+        const distance = Math.abs(pageCenter - containerCenter);
+
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          closestPage = pageNum;
+        }
+      });
+
+      if (closestPage !== currentPage) {
+        setCurrentPage(closestPage);
+      }
+    };
+
+    container.addEventListener("scroll", handleScroll);
+    return () => container.removeEventListener("scroll", handleScroll);
+  }, [numPages, currentPage]);
 
   const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
     setNumPages(numPages);
@@ -62,11 +111,24 @@ export function PdfViewer({ documentId, pdfUrl, initialComments }: PdfViewerProp
     setIsLoading(false);
   };
 
-  // Handle text selection
+  // Handle text selection - detect which page the selection is on
   const handleTextSelection = useCallback(() => {
     const selection = window.getSelection();
     if (selection && selection.toString().trim()) {
       setSelectedText(selection.toString().trim());
+
+      // Try to determine which page the selection is on
+      const anchorNode = selection.anchorNode;
+      if (anchorNode) {
+        let element = anchorNode.parentElement;
+        while (element && !element.dataset.pageNumber) {
+          element = element.parentElement;
+        }
+        if (element?.dataset.pageNumber) {
+          setCurrentPage(parseInt(element.dataset.pageNumber));
+        }
+      }
+
       setShowCommentForm(true);
     }
   }, []);
@@ -112,6 +174,10 @@ export function PdfViewer({ documentId, pdfUrl, initialComments }: PdfViewerProp
   const handleCommentClick = useCallback((commentId: string) => {
     const comment = comments.find((c) => c.id === commentId);
     if (comment?.pageNumber) {
+      const pageEl = pageRefs.current.get(comment.pageNumber);
+      if (pageEl) {
+        pageEl.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
       setCurrentPage(comment.pageNumber);
     }
     setSelectedCommentId(commentId);
@@ -119,9 +185,16 @@ export function PdfViewer({ documentId, pdfUrl, initialComments }: PdfViewerProp
 
   const goToPage = (page: number) => {
     if (page >= 1 && page <= (numPages || 1)) {
+      const pageEl = pageRefs.current.get(page);
+      if (pageEl) {
+        pageEl.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
       setCurrentPage(page);
     }
   };
+
+  // Count comments on visible pages (for the indicator)
+  const commentsOnCurrentPage = comments.filter((c) => c.pageNumber === currentPage).length;
 
   return (
     <div className="flex h-full gap-4 relative">
@@ -194,60 +267,75 @@ export function PdfViewer({ documentId, pdfUrl, initialComments }: PdfViewerProp
           </div>
         </div>
 
-        {/* PDF Content */}
+        {/* PDF Content - Continuous Scroll */}
         <div
           ref={containerRef}
           className="flex-1 overflow-auto bg-gray-100 p-4"
           onMouseUp={handleTextSelection}
         >
-          <div className="flex justify-center">
-            <Document
-              file={pdfUrl}
-              onLoadSuccess={onDocumentLoadSuccess}
-              onLoadError={onDocumentLoadError}
-              loading={
-                <div className="flex items-center justify-center h-96">
-                  <div className="text-center">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
-                    <p className="text-sm text-muted-foreground">Loading PDF...</p>
-                  </div>
+          <Document
+            file={proxiedPdfUrl}
+            onLoadSuccess={onDocumentLoadSuccess}
+            onLoadError={onDocumentLoadError}
+            loading={
+              <div className="flex items-center justify-center h-96">
+                <div className="text-center">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
+                  <p className="text-sm text-muted-foreground">Loading PDF...</p>
                 </div>
-              }
-              error={
-                <div className="flex items-center justify-center h-96">
-                  <div className="text-center">
-                    <p className="text-destructive mb-2">Failed to load PDF</p>
-                    <p className="text-sm text-muted-foreground">
-                      The document may not be available or the URL may be incorrect.
-                    </p>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="mt-4"
-                      onClick={() => window.open(pdfUrl, "_blank")}
-                    >
-                      Try opening directly
-                    </Button>
-                  </div>
+              </div>
+            }
+            error={
+              <div className="flex items-center justify-center h-96">
+                <div className="text-center">
+                  <p className="text-destructive mb-2">Failed to load PDF</p>
+                  <p className="text-sm text-muted-foreground">
+                    The document may not be available or the URL may be incorrect.
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-4"
+                    onClick={() => window.open(pdfUrl, "_blank")}
+                  >
+                    Try opening directly
+                  </Button>
                 </div>
-              }
-            >
-              <Page
-                pageNumber={currentPage}
-                scale={scale}
-                className="shadow-lg"
-                renderTextLayer={true}
-                renderAnnotationLayer={true}
-              />
-            </Document>
-          </div>
-
-          {/* Page indicators for comments */}
-          {comments.filter((c) => c.pageNumber === currentPage).length > 0 && (
-            <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-primary text-primary-foreground px-3 py-1 rounded-full text-sm">
-              {comments.filter((c) => c.pageNumber === currentPage).length} comment(s) on this page
+              </div>
+            }
+          >
+            <div className="flex flex-col items-center gap-4">
+              {numPages &&
+                Array.from({ length: numPages }, (_, index) => (
+                  <div
+                    key={index + 1}
+                    ref={(el) => {
+                      if (el) pageRefs.current.set(index + 1, el);
+                    }}
+                    data-page-number={index + 1}
+                    className="relative"
+                  >
+                    <Page
+                      pageNumber={index + 1}
+                      scale={scale}
+                      className="shadow-lg"
+                      renderTextLayer={true}
+                      renderAnnotationLayer={true}
+                    />
+                    {/* Page number label */}
+                    <div className="absolute bottom-2 right-2 bg-black/50 text-white text-xs px-2 py-1 rounded">
+                      Page {index + 1}
+                    </div>
+                    {/* Comment indicator on page */}
+                    {comments.filter((c) => c.pageNumber === index + 1).length > 0 && (
+                      <div className="absolute top-2 right-2 bg-primary text-primary-foreground text-xs px-2 py-1 rounded-full">
+                        {comments.filter((c) => c.pageNumber === index + 1).length} comment(s)
+                      </div>
+                    )}
+                  </div>
+                ))}
             </div>
-          )}
+          </Document>
         </div>
 
         {/* Floating comment form */}
